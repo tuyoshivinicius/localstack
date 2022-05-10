@@ -14,6 +14,8 @@ import botocore.config
 import dateutil.parser
 import xmltodict
 from botocore.client import ClientError
+
+from localstack.services.generic_proxy import ProxyListener
 from moto.s3.exceptions import InvalidFilterRuleName
 from moto.s3.models import s3_backend
 from pytz import timezone
@@ -55,7 +57,6 @@ from localstack.utils.common import (
     to_bytes,
     to_str,
 )
-from localstack.utils.persistence import PersistingProxyListener
 
 # backend port (configured in s3_starter.py on startup)
 PORT_S3_BACKEND = None
@@ -1134,7 +1135,7 @@ def remove_bucket_notification(bucket):
         del S3_NOTIFICATIONS[bucket]
 
 
-class ProxyListenerS3(PersistingProxyListener):
+class ProxyListenerS3(ProxyListener):
     def api_name(self):
         return "s3"
 

@@ -20,7 +20,7 @@ from requests.models import Request, Response
 from localstack.config import external_service_url
 from localstack.constants import MOTO_ACCOUNT_ID, TEST_AWS_ACCOUNT_ID
 from localstack.services.awslambda import lambda_api
-from localstack.services.generic_proxy import RegionBackend
+from localstack.services.generic_proxy import RegionBackend, ProxyListener
 from localstack.utils.analytics import event_publisher
 from localstack.utils.aws import aws_stack
 from localstack.utils.aws.aws_responses import (
@@ -43,7 +43,6 @@ from localstack.utils.common import (
     to_bytes,
     to_str,
 )
-from localstack.utils.persistence import PersistingProxyListener
 
 # set up logger
 LOG = logging.getLogger(__name__)
@@ -91,7 +90,7 @@ class SNSBackend(RegionBackend):
         self.sms_messages = []
 
 
-class ProxyListenerSNS(PersistingProxyListener):
+class ProxyListenerSNS(ProxyListener):
     def api_name(self):
         return "sns"
 
@@ -343,9 +342,6 @@ class ProxyListenerSNS(PersistingProxyListener):
         )
 
     def return_response(self, method, path, data, headers, response):
-        # persist requests to disk
-        super(ProxyListenerSNS, self).return_response(method, path, data, headers, response)
-
         if method == "POST" and path == "/":
             # convert account IDs in ARNs
             data = aws_stack.fix_account_id_in_arns(data, colon_delimiter="%3A")

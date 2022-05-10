@@ -16,7 +16,6 @@ from localstack.http.adapters import ProxyListenerAdapter
 from localstack.services.generic_proxy import ProxyListener
 from localstack.services.messages import MessagePayload
 from localstack.utils.aws.request_context import extract_region_from_headers
-from localstack.utils.persistence import PersistingProxyListener
 
 LOG = logging.getLogger(__name__)
 
@@ -83,13 +82,3 @@ class AsfWithFallbackListener(AwsApiListener):
 
     def get_forward_url(self, method: str, path: str, data, headers):
         return self.fallback.get_forward_url(method, path, data, headers)
-
-
-class AsfWithPersistingFallbackListener(AsfWithFallbackListener, PersistingProxyListener):
-    fallback: PersistingProxyListener
-
-    def __init__(self, api: str, delegate: Any, fallback: PersistingProxyListener):
-        super().__init__(api, delegate, fallback)
-
-    def api_name(self):
-        return self.fallback.api_name()

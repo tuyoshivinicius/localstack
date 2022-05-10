@@ -4,6 +4,8 @@ import re
 from urllib.parse import urlencode
 
 import xmltodict
+
+from localstack.services.generic_proxy import ProxyListener
 from moto.sqs.models import TRANSPORT_TYPE_ENCODINGS, Message
 from moto.sqs.utils import parse_message_attributes
 from requests.models import Request
@@ -21,7 +23,6 @@ from localstack.utils.aws.aws_responses import (
     requests_response,
 )
 from localstack.utils.common import clone, get_service_protocol, parse_request_data, to_str
-from localstack.utils.persistence import PersistingProxyListener
 
 LOG = logging.getLogger(__name__)
 
@@ -237,7 +238,7 @@ def validate_empty_message_batch(data, req_data):
     return False
 
 
-class ProxyListenerSQS(PersistingProxyListener):
+class ProxyListenerSQS(ProxyListener):
     def api_name(self):
         return "sqs"
 
@@ -336,9 +337,6 @@ class ProxyListenerSQS(PersistingProxyListener):
         return True
 
     def return_response(self, method, path, data, headers, response):
-        # persist requests to disk
-        super(ProxyListenerSQS, self).return_response(method, path, data, headers, response)
-
         if method == "OPTIONS" and path == "/":
             # Allow CORS preflight requests to succeed.
             return 200
