@@ -20,7 +20,7 @@ from requests.models import Request, Response
 from localstack.config import external_service_url
 from localstack.constants import MOTO_ACCOUNT_ID, TEST_AWS_ACCOUNT_ID
 from localstack.services.awslambda import lambda_api
-from localstack.services.generic_proxy import RegionBackend, ProxyListener
+from localstack.services.generic_proxy import ProxyListener, RegionBackend
 from localstack.utils.analytics import event_publisher
 from localstack.utils.aws import aws_stack
 from localstack.utils.aws.aws_responses import (

@@ -14,14 +14,13 @@ import botocore.config
 import dateutil.parser
 import xmltodict
 from botocore.client import ClientError
-
-from localstack.services.generic_proxy import ProxyListener
 from moto.s3.exceptions import InvalidFilterRuleName
 from moto.s3.models import s3_backend
 from pytz import timezone
 from requests.models import Request, Response
 
 from localstack import config, constants
+from localstack.services.generic_proxy import ProxyListener
 from localstack.services.s3 import multipart_content
 from localstack.services.s3.s3_utils import (
     ALLOWED_HEADER_OVERRIDES,
