@@ -84,6 +84,19 @@ FIFO_MSG_REGEX = "^[0-9a-zA-z!\"#$%&'()*+,./:;<=>?@[\\]^_`{|}~-]*$"
 
 DEDUPLICATION_INTERVAL_IN_SEC = 5 * 60
 
+IMMUTABLE_QUEUE_ATTRIBUTES = [
+    # these attributes cannot be changed by set_queue_attributes and should
+    # therefore be ignored when comparing queue attributes for create_queue
+    QueueAttributeName.ApproximateNumberOfMessages,
+    QueueAttributeName.ApproximateNumberOfMessagesDelayed,
+    QueueAttributeName.ApproximateNumberOfMessagesNotVisible,
+    QueueAttributeName.ContentBasedDeduplication,
+    QueueAttributeName.CreatedTimestamp,
+    QueueAttributeName.FifoQueue,
+    QueueAttributeName.LastModifiedTimestamp,
+    QueueAttributeName.QueueArn,
+]
+
 
 class InvalidParameterValue(CommonServiceException):
     def __init__(self, message):
@@ -586,7 +599,7 @@ class FifoQueue(SqsQueue):
 
         for k in attributes.keys():
             if k not in valid:
-                raise InvalidAttributeName(f"Unknown Attribute {k}")
+                raise InvalidAttributeName(f"Unknown Attribute {k}.")
         # Special Cases
         fifo = attributes.get(QueueAttributeName.FifoQueue)
         if fifo and fifo.lower() != "true":
@@ -1191,6 +1204,8 @@ class SqsProvider(SqsApi, ServiceLifecycleHook):
         queue.validate_queue_attributes(attributes)
 
         for k, v in attributes.items():
+            if k in IMMUTABLE_QUEUE_ATTRIBUTES:
+                raise InvalidAttributeName(f"Unknown Attribute {k}.")
             queue.attributes[k] = v
 
         # Special cases
