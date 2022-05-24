@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 
 from localstack import config
-from localstack.services.infra import log_startup_message, start_proxy_for_service
+from localstack.services.infra import log_startup_message
 from localstack.services.kinesis import kinesalite_server, kinesis_listener, kinesis_mock_server
 from localstack.utils.aws import aws_stack
 from localstack.utils.serving import Server
@@ -34,13 +34,6 @@ def start_kinesis(port=None, update_listener=None, asynchronous=None) -> Server:
 
     _server.start()
     log_startup_message("Kinesis")
-    port = port or config.service_port("kinesis")
-    start_proxy_for_service(
-        "kinesis",
-        port,
-        backend_port=_server.port,
-        update_listener=update_listener,
-    )
     return _server
 
 

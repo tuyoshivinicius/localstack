@@ -1,5 +1,6 @@
 from localstack import config
 from localstack.aws.proxy import AwsApiListener
+from localstack.services.kinesis.provider import KinesisApiListener
 from localstack.services.moto import MotoFallbackDispatcher
 from localstack.services.plugins import Service, aws_provider
 
@@ -134,13 +135,13 @@ def sts():
 
 @aws_provider()
 def kinesis():
-    from localstack.services.kinesis import kinesis_listener, kinesis_starter
-
+    # from localstack.services.kinesis import kinesis_listener, kinesis_starter
+    # return Service("kinesis", listener=kinesis_listener.UPDATE_KINESIS, start=kinesis_starter.start_kinesis, check=kinesis_starter.check_kinesis,)
+    listener = KinesisApiListener()
     return Service(
         "kinesis",
-        listener=kinesis_listener.UPDATE_KINESIS,
-        start=kinesis_starter.start_kinesis,
-        check=kinesis_starter.check_kinesis,
+        listener=listener,
+        lifecycle_hook=listener.provider,
     )
 
 

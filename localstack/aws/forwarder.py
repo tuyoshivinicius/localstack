@@ -74,7 +74,9 @@ def get_request_forwarder_http(forward_url_getter: Callable[[], str]) -> Service
                 parameters=service_request,
                 region=context.region,
             )
-            local_context.request.headers.extend(context.request.headers)
+            # TODO This causes duplicate content-type headers - EXTEND adds the headers, where it should actually overwrite some?
+            # local_context.request.headers.extend(context.request.headers)
+            local_context.request.headers.update(context.request.headers)
             context = local_context
         return forward_request(context, forward_url_getter)
 
@@ -116,6 +118,7 @@ def dispatch_to_backend(
     }
 
     parser = create_parser(context.service.protocol)
+    # TODO boto cannot handle cbor!
     response = parser.parse(response_dict, operation_model.output_shape)
 
     if status >= 301:
