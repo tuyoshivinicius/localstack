@@ -1,9 +1,14 @@
+import json
 import logging
 
 from localstack.aws import handlers
+from localstack.aws.api import RequestContext
+from localstack.aws.chain import HandlerChain
 from localstack.aws.handlers.service_plugin import ServiceLoader
+from localstack.http import Response
 from localstack.services.plugins import SERVICE_PLUGINS, ServiceManager, ServicePluginManager
-
+from localstack.utils import analytics
+from localstack.utils.json import json_safe
 from .gateway import Gateway
 from .handlers.fallback import EmptyResponseHandler
 from .handlers.service import ServiceRequestRouter
@@ -49,17 +54,60 @@ class LocalstackAwsGateway(Gateway):
                 handlers.log_exception,
                 handlers.handle_service_exception,
                 handlers.handle_internal_failure,
+                self.log_exception_event,
             ]
         )
 
         # response post-processing
         self.response_handlers.extend(
             [
+                self.log_response_event,
                 handlers.add_cors_response_headers,
                 handlers.log_response,
                 handlers.pop_request_context,
             ]
         )
+
+    def log_exception_event(
+        self,
+        chain: HandlerChain,
+        exception: Exception,
+        context: RequestContext,
+        response: Response,
+    ):
+        if not context.service:
+            return
+
+        payload = {
+            "request_id": context.request_id,
+            "aws_service_name": context.service.service_name,
+            "aws_operation_name": context.operation.name if context.operation else None,
+            "http_status_code": response.status_code,
+            # error specific
+            "error_type": type(exception).__name__,
+            "error_message": str(exception),
+        }
+
+        # TODO: exception-specific message?
+
+        analytics.log.event("aws:error", payload=payload)
+
+    def log_response_event(self, chain: HandlerChain, context: RequestContext, response: Response):
+        if not context.service:
+            return
+
+        # log request
+        payload = {
+            "request_id": context.request_id,
+            "aws_service_name": context.service.service_name,
+            "aws_operation_name": context.operation.name if context.operation else None,
+            "http_status_code": response.status_code,
+            "request": json_safe(context.service_request),
+        }
+
+        # TODO: exception-specific message?
+
+        analytics.log.event("aws:request", payload=payload)
 
 
 def main():

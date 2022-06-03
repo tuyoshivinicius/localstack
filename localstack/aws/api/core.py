@@ -1,4 +1,6 @@
 import functools
+import uuid
+
 import sys
 from typing import Any, NamedTuple, Optional, Type, Union
 
@@ -58,6 +60,7 @@ class ServiceOperation(NamedTuple):
 
 
 class RequestContext:
+    request_id: str
     request: Optional[Request]
     service: Optional[ServiceModel]
     operation: Optional[OperationModel]
@@ -65,8 +68,9 @@ class RequestContext:
     account_id: Optional[str]
     service_request: Optional[ServiceRequest]
 
-    def __init__(self) -> None:
+    def __init__(self, request_id=None) -> None:
         super().__init__()
+        self.request_id = request_id or str(uuid.uuid4())
         self.service = None
         self.operation = None
         self.region = None
