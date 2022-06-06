@@ -6,26 +6,22 @@ import unittest
 from unittest.mock import MagicMock
 
 import pytest
+from werkzeug import Response
 
-from localstack.services.generic_proxy import ProxyListener, start_proxy_server
-from localstack.utils.common import (
+from localstack.utils.collections import is_none_or_empty
+from localstack.utils.crypto import (
     PEM_CERT_END,
     PEM_CERT_START,
     PEM_KEY_END_REGEX,
     PEM_KEY_START_REGEX,
-    FileListener,
-    FileMappedDocument,
-    download,
     generate_ssl_cert,
-    get_free_tcp_port,
-    is_none_or_empty,
-    load_file,
-    new_tmp_file,
-    poll_condition,
-    rm_rf,
-    run,
-    synchronized,
 )
+from localstack.utils.files import load_file, new_tmp_file, rm_rf
+from localstack.utils.http import download
+from localstack.utils.json import FileMappedDocument
+from localstack.utils.run import run
+from localstack.utils.sync import poll_condition, synchronized
+from localstack.utils.tail import FileListener
 
 
 class SynchronizedTest(unittest.TestCase):
@@ -262,22 +258,21 @@ def test_generate_ssl_cert():
     rm_rf(key_file_name)
 
 
-def test_download_with_timeout():
-    class DownloadListener(ProxyListener):
-        def forward_request(self, method, path, data, headers):
-            if path == "/sleep":
-                time.sleep(2)
-            return {}
+def test_download_with_timeout(tmp_path, httpserver):
+    def sleepy(request):
+        time.sleep(2)
+        return Response("{}")
 
-    port = get_free_tcp_port()
-    proxy = start_proxy_server(port, update_listener=DownloadListener())
+    def normal(request):
+        return Response("{}")
 
-    tmp_file = new_tmp_file()
-    download(f"http://localhost:{port}/", tmp_file)
-    assert load_file(tmp_file) == "{}"
+    httpserver.expect_request("/").respond_with_handler(normal)
+    httpserver.expect_request("/sleep").respond_with_handler(sleepy)
+
+    tmp_file = tmp_path / "foo.json"
+
+    download(httpserver.url_for("/"), str(tmp_file))
+    assert tmp_file.read_text() == "{}"
+
     with pytest.raises(TimeoutError):
-        download(f"http://localhost:{port}/sleep", tmp_file, timeout=1)
-
-    # clean up
-    proxy.stop()
-    rm_rf(tmp_file)
+        download(httpserver.url_for("/sleep"), str(tmp_file), timeout=1)
