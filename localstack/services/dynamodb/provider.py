@@ -73,6 +73,7 @@ from localstack.aws.api.dynamodb import (
     TimeToLiveSpecification,
     TransactGetItemList,
     TransactGetItemsOutput,
+    TransactionCanceledException,
     TransactWriteItemsInput,
     TransactWriteItemsOutput,
     UpdateGlobalTableOutput,
@@ -80,7 +81,7 @@ from localstack.aws.api.dynamodb import (
     UpdateItemOutput,
     UpdateTableInput,
     UpdateTableOutput,
-    UpdateTimeToLiveOutput,
+    UpdateTimeToLiveOutput, CancellationReason,
 )
 from localstack.aws.forwarder import HttpFallbackDispatcher, get_request_forwarder_http
 from localstack.aws.proxy import AwsApiListener
@@ -744,7 +745,14 @@ class DynamoDBProvider(DynamodbApi, ServiceLifecycleHook):
                     existing_items.append(ItemFinder.find_existing_item(inner_item))
 
         # forward request to backend
-        result = self.forward_request(context)
+        try:
+            result = self.forward_request(context)
+        except CommonServiceException as e:
+            if e.code == "TransactionCanceledException":
+                exception = TransactionCanceledException(e.code)
+                exception.CancellationReasons = [CancellationReason(Code="ConditionalCheckFailed")]
+                raise exception
+            raise e
 
         # determine and forward stream records
         streams_enabled_cache = {}

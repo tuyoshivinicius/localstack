@@ -929,6 +929,34 @@ class TestDynamoDB:
         )
         assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
 
+    def test_transaction_write_items_fail_condition(
+        self, dynamodb_client, dynamodb_create_table_with_parameters
+    ):
+        table_name = "test-ddb-table-%s" % short_uid()
+
+        dynamodb_create_table_with_parameters(
+            TableName=table_name,
+            KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
+            ProvisionedThroughput={"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+            Tags=TEST_DDB_TAGS,
+        )
+
+        with pytest.raises(Exception) as ctx:
+            dynamodb_client.transact_write_items(
+                TransactItems=[
+                    {
+                        "ConditionCheck": {
+                            "TableName": table_name,
+                            "ConditionExpression": "attribute_exists(id)",
+                            "Key": {"id": {"S": "test1"}},
+                        }
+                    },
+                    {"Put": {"TableName": table_name, "Item": {"id": {"S": "test2"}}}},
+                ]
+            )
+        assert ctx.match("TransactionCanceledException")
+
     def test_transaction_write_binary_data(
         self, dynamodb_client, dynamodb_create_table_with_parameters
     ):
