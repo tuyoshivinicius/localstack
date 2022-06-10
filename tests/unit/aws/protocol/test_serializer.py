@@ -2,7 +2,7 @@ import copy
 import io
 import re
 from datetime import datetime
-from typing import Iterator, Optional
+from typing import Any, Dict, Iterator, Optional
 
 import pytest
 from botocore.endpoint import convert_to_response_dict
@@ -12,6 +12,11 @@ from requests.models import Response as RequestsResponse
 from urllib3 import HTTPResponse as UrlLibHttpResponse
 
 from localstack.aws.api import CommonServiceException, ServiceException
+from localstack.aws.api.dynamodb import (
+    AttributeValue,
+    CancellationReason,
+    TransactionCanceledException,
+)
 from localstack.aws.protocol.serializer import (
     ProtocolSerializerError,
     QueryResponseSerializer,
@@ -94,6 +99,7 @@ def _botocore_error_serializer_integration_test(
     status_code: int,
     message: Optional[str],
     is_sender_fault: bool = False,
+    **additional_error_fields: Dict[str, Any]
 ):
     """
     Performs an integration test for the error serialization using botocore as parser.
@@ -111,6 +117,8 @@ def _botocore_error_serializer_integration_test(
                  "CloudFrontOriginAccessIdentityAlreadyExists")
     :param status_code: expected HTTP response status code
     :param message: expected error message
+    :param is_sender_fault: expected fault type is sender
+    :param additional_error_fields: additional fields which need to be present (for exception shapes with members)
     :return: None
     """
 
@@ -147,6 +155,10 @@ def _botocore_error_serializer_integration_test(
         assert type == "Sender"
     else:
         assert type is None
+    if additional_error_fields:
+        for key, value in additional_error_fields.items():
+            assert key in parsed_response
+            assert parsed_response[key] == value
 
 
 def test_rest_xml_serializer_cloudfront_with_botocore():
@@ -543,6 +555,28 @@ def test_json_protocol_custom_error_serialization():
         "APIAccessCensorship",
         451,
         "You shall not access this API! Sincerely, your friendly neighbourhood firefighter.",
+    )
+
+
+def test_json_protocol_error_serialization_with_additional_members():
+
+    exception = TransactionCanceledException("Exception message!")
+    cancellation_reasons = [
+        CancellationReason(
+            Code="TestCancellationReasonCode",
+            Message="TestCancellationReasonMessage",
+            Item={"TestAttributeName": AttributeValue(S="TestAttributeValue")},
+        )
+    ]
+    exception.CancellationReasons = cancellation_reasons
+    _botocore_error_serializer_integration_test(
+        "dynamodb",
+        "ExecuteTransaction",
+        exception,
+        "TransactionCanceledException",
+        400,
+        "Exception message!",
+        CancellationReasons=cancellation_reasons,
     )
 
 

@@ -293,7 +293,7 @@ class ResponseSerializer(abc.ABC):
         code: str,
         sender_fault: bool,
         response: HttpResponse,
-        shape: Shape,
+        shape: StructureShape,
         operation_model: OperationModel,
     ) -> None:
         raise NotImplementedError
@@ -542,7 +542,7 @@ class BaseXMLResponseSerializer(ResponseSerializer):
         code: str,
         sender_fault: bool,
         response: HttpResponse,
-        shape: Shape,
+        shape: StructureShape,
         operation_model: OperationModel,
     ) -> None:
         # TODO handle error shapes with members
@@ -944,7 +944,7 @@ class RestXMLResponseSerializer(BaseRestResponseSerializer, BaseXMLResponseSeria
         code: str,
         sender_fault: bool,
         response: HttpResponse,
-        shape: Shape,
+        shape: StructureShape,
         operation_model: OperationModel,
     ) -> None:
         # It wouldn't be a spec if there wouldn't be any exceptions.
@@ -1041,7 +1041,7 @@ class EC2ResponseSerializer(QueryResponseSerializer):
         code: str,
         sender_fault: bool,
         response: HttpResponse,
-        shape: Shape,
+        shape: StructureShape,
         operation_model: OperationModel,
     ) -> None:
         # EC2 errors look like:
@@ -1101,14 +1101,21 @@ class JSONResponseSerializer(ResponseSerializer):
         code: str,
         sender_fault: bool,
         response: HttpResponse,
-        shape: Shape,
+        shape: StructureShape,
         operation_model: OperationModel,
     ) -> None:
-        # TODO handle error shapes with members
         body = {"__type": code}
         message = self._get_error_message(error)
         if message is not None:
             body["message"] = message
+
+        if shape:
+            remaining_params = {}
+            for member in shape.members:
+                if hasattr(error, member):
+                    remaining_params[member] = getattr(error, member)
+            self._serialize(body, remaining_params, shape)
+
         response.set_json(body)
 
     def _serialize_response(
