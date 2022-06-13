@@ -2,6 +2,7 @@ import logging
 
 from localstack.aws import handlers
 from localstack.aws.handlers.service_plugin import ServiceLoader
+from localstack.aws.handlers.tracing import TracingHandler
 from localstack.services.plugins import SERVICE_PLUGINS, ServiceManager, ServicePluginManager
 
 from .gateway import Gateway
@@ -21,10 +22,13 @@ class LocalstackAwsGateway(Gateway):
         # lazy-loads services into the router
         load_service = ServiceLoader(self.service_manager, self.service_request_router)
 
+        tracer = TracingHandler()
+
         # the main request handler chain
         self.request_handlers.extend(
             [
                 handlers.push_request_context,
+                tracer.create_trace,
                 handlers.parse_service_name,  # enforce_cors and content_decoder depend on the service name
                 handlers.enforce_cors,
                 handlers.content_decoder,
@@ -36,9 +40,11 @@ class LocalstackAwsGateway(Gateway):
                 handlers.add_region_from_header,
                 handlers.add_default_account_id,
                 handlers.parse_service_request,
+                tracer.record_parsed_request,
                 handlers.serve_custom_service_request_handlers,
                 load_service,  # once we have the service request we can make sure we load the service
                 self.service_request_router,  # once we know the service is loaded we can route the request
+                tracer.record_dispatched_request,
                 # if the chain is still running, set an empty response
                 EmptyResponseHandler(404, b'{"message": "Not Found"}'),
             ]
@@ -47,6 +53,7 @@ class LocalstackAwsGateway(Gateway):
         # exception handlers in the chain
         self.exception_handlers.extend(
             [
+                tracer.record_exception,
                 handlers.log_exception,
                 handlers.handle_service_exception,
                 handlers.handle_internal_failure,
@@ -59,7 +66,9 @@ class LocalstackAwsGateway(Gateway):
                 handlers.run_custom_response_handlers,
                 handlers.add_cors_response_headers,
                 handlers.log_response,
+                tracer.record_response,
                 handlers.pop_request_context,
+                tracer.log_trace,
             ]
         )
 
