@@ -1,7 +1,10 @@
 import json
 import os
+import re
 import sys
 from typing import Dict, List, Optional
+
+from click import ClickException
 
 from localstack.utils.analytics.cli import publish_invocation
 
@@ -424,6 +427,69 @@ def infra():
 @publish_invocation
 def cmd_infra_start(ctx, *args, **kwargs):
     ctx.invoke(cmd_start, *args, **kwargs)
+
+
+@localstack.group(name="plugins", help="Manage third-party plugins for LocalStack")
+def plugins():
+    pass
+
+
+@plugins.command("init")
+@publish_invocation
+def cmd_plugins_init():
+    from localstack import config
+    from localstack.utils import docker_utils
+
+    host_plugin_dir = os.path.join(config.dirs.var_libs, "plugins")
+    container_plugin_dir = os.path.join(config.Directories.for_container().var_libs, "plugins")
+
+    stdout, _ = docker_utils.DOCKER_CLIENT.run_container(
+        image_name="localstack/localstack",
+        entrypoint="",
+        command=[
+            "bash",
+            "-c",
+            f"source .venv/bin/activate;"
+            f"python -m venv {container_plugin_dir}/.venv;"
+            f"realpath .venv/lib/python*/site-packages > $(realpath {container_plugin_dir}/.venv/lib/python*/site-packages)/localstack-venv.pth;"
+            f"realpath {container_plugin_dir}/.venv/lib/python*/site-packages > $(realpath .venv/lib/python*/site-packages)/localstack-plugins-venv.pth;",
+        ],
+        mount_volumes=[(host_plugin_dir, container_plugin_dir)],
+    )
+    click.echo(stdout)
+
+
+@plugins.command("install")
+@click.argument("plugin", required=True)
+@publish_invocation
+def cmd_plugins_install(plugin: str):
+    from localstack import config
+    from localstack.utils import docker_utils
+
+    if not re.match("^[a-zA-Z0-9_.-]+$", plugin):
+        raise ClickException("invalid plugin name")
+
+    host_plugin_dir = os.path.join(config.dirs.var_libs, "plugins")
+
+    if not os.path.exists(os.path.join(host_plugin_dir, ".venv")):
+        raise ClickException(
+            "plugin dir not initialized, please run `localstack plugins init` first"
+        )
+
+    container_plugin_dir = os.path.join(config.Directories.for_container().var_libs, "plugins")
+
+    stdout, _ = docker_utils.DOCKER_CLIENT.run_container(
+        image_name="localstack/localstack",
+        entrypoint="",
+        command=[
+            "bash",
+            "-c",
+            f"source {container_plugin_dir}/.venv/bin/activate;" f"pip install {plugin};",
+        ],
+        mount_volumes=[(host_plugin_dir, container_plugin_dir)],
+    )
+
+    click.echo(stdout)
 
 
 class DockerStatus(TypedDict, total=False):
