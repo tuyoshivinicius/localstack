@@ -103,9 +103,10 @@ def create_kinesis_mock_server(port=None, persist_path: Optional[str] = None) ->
     config.KINESIS_INITIALIZE_STREAMS -> Initialize the given streams on startup
     """
     port = port or get_free_tcp_port()
-    is_kinesis_mock_installed, kinesis_mock_bin_path = install.get_is_kinesis_mock_installed()
-    if not is_kinesis_mock_installed:
-        install.install_kinesis_mock(kinesis_mock_bin_path)
+    install_kinesis_mock = install.KinesisMockInstaller()
+
+    package = install_kinesis_mock()
+
     persist_path = (
         f"{config.dirs.data}/kinesis" if not persist_path and config.dirs.data else persist_path
     )

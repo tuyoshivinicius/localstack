@@ -100,6 +100,25 @@ class Directories:
         )
 
     @staticmethod
+    def defaults() -> "Directories":
+        """
+        Returns Localstack directory paths as they are defined in the localstack filesystem hierarchy.
+
+        :returns: Directories object
+        """
+        return Directories(
+            static_libs="/usr/lib/localstack",
+            var_libs="/var/lib/localstack/libs",
+            cache="/var/lib/localstack/cache",
+            functions="/var/lib/localstack/functions",
+            data="/var/lib/localstack/data",
+            logs="/var/lib/localstack/logs",
+            tmp="/var/lib/localstack/tmp",
+            config="/etc/localstack/conf.d",
+            init="/docker-entrypoint-initaws.d",  # FIXME: move to /etc/localstack/init.d
+        )
+
+    @staticmethod
     def for_container() -> "Directories":
         """
         Returns Localstack directory paths as they are defined within the container. Everything shared and writable
@@ -107,29 +126,24 @@ class Directories:
 
         :returns: Directories object
         """
-        # only set CONTAINER_VAR_LIBS_FOLDER/CONTAINER_CACHE_FOLDER inside the container to redirect var_libs/cache to
-        # another directory to avoid override by host mount
-        var_libs = (
-            os.environ.get("CONTAINER_VAR_LIBS_FOLDER", "").strip()
-            or "/var/lib/localstack/var_libs"
-        )
-        cache = os.environ.get("CONTAINER_CACHE_FOLDER", "").strip() or "/var/lib/localstack/cache"
-        tmp = (
-            os.environ.get("CONTAINER_TMP_FOLDER", "").strip() or "/tmp/localstack"
-        )  # TODO: discuss movement to /var/lib/localstack/tmp
-        data_dir = os.environ.get("CONTAINER_DATA_DIR_FOLDER", "").strip() or (
-            DATA_DIR if in_docker() else "/tmp/localstack_data"
-        )  # TODO: move to /var/lib/localstack/data
+        return Directories.defaults()
+
+    @staticmethod
+    def for_host() -> "Directories":
+        """Returns Localstack directory paths from the config/environment variables defined by the config."""
+        root = os.environ.get("LOCALSTACK_FS_ROOT") or os.path.expanduser("~/.local/localstack")
+        defaults = Directories.defaults()
+
         return Directories(
-            static_libs=INSTALL_DIR_INFRA,
-            var_libs=var_libs,
-            cache=cache,
-            tmp=tmp,
-            functions=HOST_TMP_FOLDER,  # TODO: move to /var/lib/localstack/tmp
-            data=data_dir,
-            config=None,  # config directory is host-only
-            logs="/var/lib/localstack/logs",
-            init="/docker-entrypoint-initaws.d",
+            static_libs=os.path.join(root, defaults.static_libs),
+            var_libs=os.path.join(root, defaults.var_libs),
+            cache=os.path.join(root, defaults.cache),
+            tmp=os.path.join(root, defaults.tmp),
+            functions=os.path.join(root, defaults.functions),
+            data=os.path.join(root, defaults.data),
+            config=os.path.join(root, defaults.config),
+            logs=os.path.join(root, defaults.logs),
+            init=os.path.join(root, defaults.init),
         )
 
     def mkdirs(self):
@@ -290,10 +304,12 @@ if TMP_FOLDER.startswith("/var/folders/") and os.path.exists("/private%s" % TMP_
 # temporary folder of the host (required when running in Docker). Fall back to local tmp folder if not set
 HOST_TMP_FOLDER = os.environ.get("HOST_TMP_FOLDER", TMP_FOLDER)
 
+VAR_ROOT = os.environ.get("VAR_ROOT", TMP_FOLDER)
+
 # ephemeral cache dir that persists across reboots
-CACHE_DIR = os.environ.get("CACHE_DIR", os.path.join(TMP_FOLDER, "cache")).strip()
+CACHE_DIR = os.environ.get("CACHE_DIR", os.path.join(VAR_ROOT, "cache")).strip()
 # libs cache dir that persists across reboots
-VAR_LIBS_DIR = os.environ.get("VAR_LIBS_DIR", os.path.join(TMP_FOLDER, "var_libs")).strip()
+VAR_LIBS_DIR = os.environ.get("VAR_LIBS_DIR", os.path.join(VAR_ROOT, "var_libs")).strip()
 
 # whether to enable verbose debug logging
 LS_LOG = eval_log_type("LS_LOG")
@@ -444,7 +460,6 @@ try:
             LOCALSTACK_HOSTNAME = DOCKER_HOST_FROM_CONTAINER
 except socket.error:
     pass
-
 
 # -----
 # SERVICE-SPECIFIC CONFIGS BELOW
@@ -871,7 +886,7 @@ class ServiceProviderConfig(Mapping[str, str]):
             env = os.environ
         for key, value in env.items():
             if key.startswith(self.override_prefix):
-                self.set_provider(key[len(self.override_prefix) :].lower().replace("_", "-"), value)
+                self.set_provider(key[len(self.override_prefix):].lower().replace("_", "-"), value)
 
     def get_provider(self, service: str) -> str:
         return self._provider_config.get(service, self.default_value)
@@ -908,7 +923,7 @@ SERVICE_PROVIDER_CONFIG.load_from_environment()
 if is_in_docker:
     dirs = Directories.for_container()
 else:
-    dirs = Directories.from_config()
+    dirs = Directories.for_host()
 
 dirs.mkdirs()
 

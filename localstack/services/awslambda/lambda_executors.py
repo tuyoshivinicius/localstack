@@ -1666,7 +1666,7 @@ class OutputLog:
     def output_file(self):
         try:
             with tempfile.NamedTemporaryFile(
-                dir=TMP_FOLDER, delete=False, suffix=".log", prefix="lambda_"
+                dir=config.dirs.tmp, delete=False, suffix=".log", prefix="lambda_"
             ) as f:
                 LOG.info(f"writing log to file '{f.name}'")
                 f.write(to_bytes(self._stderr))

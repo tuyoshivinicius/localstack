@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import functools
+import dataclasses
 import glob
 import logging
 import os
@@ -7,15 +7,14 @@ import platform
 import re
 import shutil
 import stat
-import sys
 import tempfile
 import threading
-import time
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import List, Tuple, Optional
 
 import requests
-from plugin import Plugin, PluginManager
+import sys
+import time
 
 from localstack import config
 from localstack.config import dirs
@@ -32,6 +31,8 @@ from localstack.constants import (
     OPENSEARCH_DEFAULT_VERSION,
     STS_JAR_URL,
 )
+from localstack.lpm import installer
+from localstack.lpm.installer import AbstractPackageInstaller, Package
 from localstack.runtime import hooks
 from localstack.utils.archives import untar, unzip
 from localstack.utils.docker_utils import DOCKER_CLIENT
@@ -111,9 +112,6 @@ JAR_URLS = [URL_ASPECTJRT, URL_ASPECTJWEAVER]
 
 # kinesis-mock version
 KINESIS_MOCK_VERSION = os.environ.get("KINESIS_MOCK_VERSION") or "0.2.4"
-KINESIS_MOCK_RELEASE_URL = (
-    "https://api.github.com/repos/etspaceman/kinesis-mock/releases/tags/" + KINESIS_MOCK_VERSION
-)
 
 # debugpy module
 DEBUGPY_MODULE = "debugpy"
@@ -150,6 +148,11 @@ LAMBDA_RUNTIME_INIT_URL = "https://github.com/localstack/lambda-runtime-init/rel
 LAMBDA_RUNTIME_INIT_PATH = os.path.join(config.dirs.static_libs, "aws-lambda-rie")
 
 OS_INSTALL_LOCKS = {}
+
+# TODO: deprecated, use `localstack.lpm.installer`
+Installer = installer.Installer
+InstallerRepository = installer.InstallerRepository
+InstallerManager = installer.InstallerManager
 
 
 def get_elasticsearch_install_version(version: str) -> str:
@@ -326,11 +329,99 @@ def install_kinesis():
         install_kinesalite()
         return
     if config.KINESIS_PROVIDER == "kinesis-mock":
-        is_installed, bin_path = get_is_kinesis_mock_installed()
-        if not is_installed:
-            install_kinesis_mock(bin_path)
+        install_kinesis_mock = KinesisMockInstaller()
+        install_kinesis_mock()
         return
     raise ValueError(f"Unknown Kinesis provider {config.KINESIS_PROVIDER}")
+
+
+@dataclasses.dataclass
+class KinesisMockPackage(Package):
+    bin_file_path: str
+
+
+class KinesisMockInstaller(AbstractPackageInstaller):
+    release_url = "https://api.github.com/repos/etspaceman/kinesis-mock/releases/tags/{version}"
+
+    def __init__(self) -> None:
+        super().__init__("bin/kinesis-mock-{version}/", default_version=KINESIS_MOCK_VERSION)
+        self.force_java = config.is_env_true("KINESIS_MOCK_FORCE_JAVA")
+
+    def package(self, root: Optional[str | os.PathLike], version: str) -> Package:
+        bin_file_path = self._kinesis_mock_install_path(root)
+        return KinesisMockPackage(root, version, bin_file_path)
+
+    def is_installed(self, root: Path, version: str) -> bool:
+        is_installed, _ = self._get_is_kinesis_mock_installed(root)
+        return is_installed
+
+    def install(self, root: Path, version: str) -> Package:
+        _, path = self._kinesis_mock_install_path(root)
+        self._install_kinesis_mock(path, version)
+        return KinesisMockPackage(root, path, )
+
+    def _install_kinesis_mock(self, bin_file_path: str, version: str):
+        url = self.release_url.format(version=version)
+        response = requests.get(url)
+
+        if not response.ok:
+            raise ValueError(
+                f"Could not get list of releases from {url}: {response.text}"
+            )
+
+        github_release = response.json()
+        download_url = None
+        bin_file_name = os.path.basename(bin_file_path)
+        for asset in github_release.get("assets", []):
+            # find the correct binary in the release
+            if asset["name"] == bin_file_name:
+                download_url = asset["browser_download_url"]
+                break
+        if download_url is None:
+            raise ValueError(
+                f"Could not find required binary {bin_file_name} in release {url}"
+            )
+
+        LOG.info("downloading kinesis-mock binary from %s", download_url)
+        download(download_url, bin_file_path)
+        chmod_r(bin_file_path, 0o777)
+
+    def _get_is_kinesis_mock_installed(self, root) -> Tuple[bool, str]:
+        """
+        Checks the host system to see if kinesis mock is installed and where.
+        :returns: True if kinesis mock is installed (False otherwise) and the expected installation path
+        """
+        bin_file_path = self._kinesis_mock_install_path(root)
+        if os.path.exists(bin_file_path):
+            LOG.debug("kinesis-mock found at %s", bin_file_path)
+            return True, bin_file_path
+
+        return False, bin_file_path
+
+    def _kinesis_mock_install_path(self, root) -> str:
+        machine = platform.machine().lower()
+        system = platform.system().lower()
+        version = platform.version().lower()
+        is_probably_m1 = system == "darwin" and ("arm64" in version or "arm32" in version)
+
+        LOG.debug("getting kinesis-mock for %s %s", system, machine)
+        if self.force_java:
+            # sometimes the static binaries may have problems, and we want to fal back to Java
+            bin_file = "kinesis-mock.jar"
+        elif (machine == "x86_64" or machine == "amd64") and not is_probably_m1:
+            if system == "windows":
+                bin_file = "kinesis-mock-mostly-static.exe"
+            elif system == "linux":
+                bin_file = "kinesis-mock-linux-amd64-static"
+            elif system == "darwin":
+                bin_file = "kinesis-mock-macos-amd64-dynamic"
+            else:
+                bin_file = "kinesis-mock.jar"
+        else:
+            bin_file = "kinesis-mock.jar"
+
+        bin_file_path = os.path.join(root, bin_file)
+        return bin_file_path
 
 
 def _apply_patches_kinesalite():
@@ -348,71 +439,6 @@ def install_kinesalite():
         log_install_msg("Kinesis")
         run(["npm", "install"], cwd=MODULE_MAIN_PATH)
         _apply_patches_kinesalite()
-
-
-def get_is_kinesis_mock_installed() -> Tuple[bool, str]:
-    """
-    Checks the host system to see if kinesis mock is installed and where.
-    :returns: True if kinesis mock is installed (False otherwise) and the expected installation path
-    """
-    bin_file_path = kinesis_mock_install_path()
-    if os.path.exists(bin_file_path):
-        LOG.debug("kinesis-mock found at %s", bin_file_path)
-        return True, bin_file_path
-    return False, bin_file_path
-
-
-def kinesis_mock_install_path() -> str:
-    machine = platform.machine().lower()
-    system = platform.system().lower()
-    version = platform.version().lower()
-    is_probably_m1 = system == "darwin" and ("arm64" in version or "arm32" in version)
-
-    LOG.debug("getting kinesis-mock for %s %s", system, machine)
-    if config.is_env_true("KINESIS_MOCK_FORCE_JAVA"):
-        # sometimes the static binaries may have problems, and we want to fal back to Java
-        bin_file = "kinesis-mock.jar"
-    elif (machine == "x86_64" or machine == "amd64") and not is_probably_m1:
-        if system == "windows":
-            bin_file = "kinesis-mock-mostly-static.exe"
-        elif system == "linux":
-            bin_file = "kinesis-mock-linux-amd64-static"
-        elif system == "darwin":
-            bin_file = "kinesis-mock-macos-amd64-dynamic"
-        else:
-            bin_file = "kinesis-mock.jar"
-    else:
-        bin_file = "kinesis-mock.jar"
-
-    bin_file_path = os.path.join(INSTALL_DIR_KINESIS_MOCK, bin_file)
-    return bin_file_path
-
-
-def install_kinesis_mock(bin_file_path: str = None):
-    response = requests.get(KINESIS_MOCK_RELEASE_URL)
-    if not response.ok:
-        raise ValueError(
-            f"Could not get list of releases from {KINESIS_MOCK_RELEASE_URL}: {response.text}"
-        )
-
-    bin_file_path = bin_file_path or kinesis_mock_install_path()
-    github_release = response.json()
-    download_url = None
-    bin_file_name = os.path.basename(bin_file_path)
-    for asset in github_release.get("assets", []):
-        # find the correct binary in the release
-        if asset["name"] == bin_file_name:
-            download_url = asset["browser_download_url"]
-            break
-    if download_url is None:
-        raise ValueError(
-            f"Could not find required binary {bin_file_name} in release {KINESIS_MOCK_RELEASE_URL}"
-        )
-
-    mkdir(INSTALL_DIR_KINESIS_MOCK)
-    LOG.info("downloading kinesis-mock binary from %s", download_url)
-    download(download_url, bin_file_path)
-    chmod_r(bin_file_path, 0o777)
 
 
 def install_local_kms():
@@ -737,15 +763,6 @@ installers = {
     "stepfunctions": install_stepfunctions_local,
 }
 
-Installer = Tuple[str, Callable]
-
-
-class InstallerRepository(Plugin):
-    namespace = "localstack.installer"
-
-    def get_installer(self) -> List[Installer]:
-        raise NotImplementedError
-
 
 class CommunityInstallerRepository(InstallerRepository):
     name = "community"
@@ -761,36 +778,12 @@ class CommunityInstallerRepository(InstallerRepository):
             ("opensearch", install_opensearch),
             ("kinesalite", install_kinesalite),
             ("kinesis-client-libs", install_amazon_kinesis_client_libs),
-            ("kinesis-mock", install_kinesis_mock),
+            ("kinesis-mock", KinesisMockInstaller()),
             ("lambda-java-libs", install_lambda_java_libs),
             ("local-kms", install_local_kms),
             ("stepfunctions-local", install_stepfunctions_local),
             ("terraform", install_terraform),
         ]
-
-
-class InstallerManager:
-    def __init__(self):
-        self.repositories: PluginManager[InstallerRepository] = PluginManager(
-            InstallerRepository.namespace
-        )
-
-    @functools.lru_cache()
-    def get_installers(self) -> Dict[str, Callable]:
-        installer: List[Installer] = []
-
-        for repo in self.repositories.load_all():
-            installer.extend(repo.get_installer())
-
-        return dict(installer)
-
-    def install(self, package: str, *args, **kwargs):
-        installer = self.get_installers().get(package)
-
-        if not installer:
-            raise ValueError("no installer for package %s" % package)
-
-        return installer(*args, **kwargs)
 
 
 def main():
