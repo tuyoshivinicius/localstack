@@ -43,7 +43,6 @@ class LocalstackAwsGateway(Gateway):
                 handlers.serve_custom_service_request_handlers,
                 load_service,  # once we have the service request we can make sure we load the service
                 self.service_request_router,  # once we know the service is loaded we can route the request
-                metric_collector.record_dispatched_request,
                 # if the chain is still running, set an empty response
                 EmptyResponseHandler(404, b'{"message": "Not Found"}'),
             ]
@@ -64,7 +63,6 @@ class LocalstackAwsGateway(Gateway):
             [
                 handlers.run_custom_response_handlers,
                 handlers.add_cors_response_headers,
-                metric_collector.record_response,
                 handlers.log_response,
                 handlers.pop_request_context,
                 metric_collector.update_metric_collection,

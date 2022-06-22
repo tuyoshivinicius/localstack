@@ -1,79 +1,50 @@
-import datetime
-import json
+import csv
 import os
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import pytest
 from _pytest.main import Session
 from _pytest.nodes import Item
 
-from localstack import config
 from localstack.aws.handlers.metric_collector import MetricCollector
 
 BASE_PATH = os.path.join(os.path.dirname(__file__), "../../../target/metric_reports")
-
 FNAME_RAW_DATA_CSV = os.path.join(
     BASE_PATH,
-    "metric-report-raw-data.csv",
+    f"metric-report-raw-data-{datetime.utcnow().strftime('%Y-%m-%d-%H-%M-%s')}.csv",
 )
+
+RAW_DATA_HEADER = [
+    "service",
+    "operation",
+    "request_headers",
+    "parameters",
+    "response_code",
+    "response",
+    "exception",
+    "test_node_id",
+    "xfail",
+    "origin",
+]
 
 
 @pytest.hookimpl()
 def pytest_sessionstart(session: "Session") -> None:
-    from pathlib import Path
-
     Path(BASE_PATH).mkdir(parents=True, exist_ok=True)
-    if config.is_collect_metrics_mode():
 
-        with open(FNAME_RAW_DATA_CSV, "w") as fd:
-            import csv
-
-            header = [
-                "service",
-                "operation",
-                "parameters",
-                "response_code",
-                "response",
-                "exception",
-                "test_node_id",
-                "xfail",
-                "origin",
-            ]
-            writer = csv.writer(fd)
-            writer.writerow(header)
-
-
-@pytest.hookimpl()
-def pytest_sessionfinish(
-    session,
-    exitstatus,
-) -> None:
-    if config.is_collect_metrics_mode():
-        dtime = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%s")
-        fname = os.path.join(
-            BASE_PATH,
-            f"metric-report-{dtime}.json",
-        )
-        with open(fname, "w") as fd:
-            fd.write(json.dumps(MetricCollector.metric_recorder_external, indent=2))
-
-        fname = os.path.join(
-            BASE_PATH,
-            f"metric-report-internal-calls-{dtime}.json",
-        )
-        with open(fname, "w") as fd:
-            fd.write(json.dumps(MetricCollector.metric_recorder_internal, indent=2))
+    with open(FNAME_RAW_DATA_CSV, "w") as fd:
+        writer = csv.writer(fd)
+        writer.writerow(RAW_DATA_HEADER)
 
 
 @pytest.hookimpl()
 def pytest_runtest_teardown(item: "Item", nextitem: Optional["Item"]) -> None:
-    if config.is_collect_metrics_mode():
-        with open(FNAME_RAW_DATA_CSV, "a") as fd:
-            import csv
-
-            writer = csv.writer(fd)
-            writer.writerows(MetricCollector.data)
-            MetricCollector.data.clear()
+    with open(FNAME_RAW_DATA_CSV, "a") as fd:
+        writer = csv.writer(fd)
+        writer.writerows(MetricCollector.data)
+        MetricCollector.data.clear()
 
 
 @pytest.hookimpl()
