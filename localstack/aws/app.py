@@ -1,7 +1,7 @@
 import logging
 
 from localstack.aws import handlers
-from localstack.aws.handlers.metric_collector import MetricCollector
+from localstack.aws.handlers.metric_handler import MetricHandler
 from localstack.aws.handlers.service_plugin import ServiceLoader
 from localstack.services.plugins import SERVICE_PLUGINS, ServiceManager, ServicePluginManager
 
@@ -22,12 +22,12 @@ class LocalstackAwsGateway(Gateway):
         # lazy-loads services into the router
         load_service = ServiceLoader(self.service_manager, self.service_request_router)
 
-        metric_collector = MetricCollector()
+        metric_collector = MetricHandler()
         # the main request handler chain
         self.request_handlers.extend(
             [
                 handlers.push_request_context,
-                metric_collector.create_metric,
+                metric_collector.create_metric_handler_item,
                 handlers.parse_service_name,  # enforce_cors and content_decoder depend on the service name
                 handlers.enforce_cors,
                 handlers.content_decoder,

@@ -8,26 +8,14 @@ import pytest
 from _pytest.main import Session
 from _pytest.nodes import Item
 
-from localstack.aws.handlers.metric_collector import MetricCollector
+from localstack.aws.handlers.metric_handler import Metric, MetricHandler
+from localstack.utils.strings import short_uid
 
 BASE_PATH = os.path.join(os.path.dirname(__file__), "../../../target/metric_reports")
 FNAME_RAW_DATA_CSV = os.path.join(
     BASE_PATH,
-    f"metric-report-raw-data-{datetime.utcnow().strftime('%Y-%m-%d-%H-%M-%s')}.csv",
+    f"metric-report-raw-data-{datetime.utcnow().strftime('%Y-%m-%d_%H:%M:%S')}-{short_uid()}.csv",
 )
-
-RAW_DATA_HEADER = [
-    "service",
-    "operation",
-    "request_headers",
-    "parameters",
-    "response_code",
-    "response",
-    "exception",
-    "test_node_id",
-    "xfail",
-    "origin",
-]
 
 
 @pytest.hookimpl()
@@ -36,21 +24,29 @@ def pytest_sessionstart(session: "Session") -> None:
 
     with open(FNAME_RAW_DATA_CSV, "w") as fd:
         writer = csv.writer(fd)
-        writer.writerow(RAW_DATA_HEADER)
+        writer.writerow(Metric.RAW_DATA_HEADER)
 
 
 @pytest.hookimpl()
 def pytest_runtest_teardown(item: "Item", nextitem: Optional["Item"]) -> None:
+    node_id = item.nodeid
+    xfail = False
+    aws_validated = False
+    snapshot = False
+
+    for _ in item.iter_markers(name="xfail"):
+        xfail = True
+    for _ in item.iter_markers(name="aws_validated"):
+        aws_validated = True
+    if hasattr(item, "fixturenames") and "snapshot" in item.fixturenames:
+        snapshot = True
+    for metric in MetricHandler.metric_data:
+        metric.xfail = xfail
+        metric.aws_validated = aws_validated
+        metric.snapshot = snapshot
+        metric.node_id = node_id
+
     with open(FNAME_RAW_DATA_CSV, "a") as fd:
         writer = csv.writer(fd)
-        writer.writerows(MetricCollector.data)
-        MetricCollector.data.clear()
-
-
-@pytest.hookimpl()
-def pytest_runtest_call(item: "Item") -> None:
-    MetricCollector.node_id = item.nodeid
-    MetricCollector.xfail = False
-    for _ in item.iter_markers(name="xfail"):
-        MetricCollector.xfail = True
-    # TODO only works if tests run sequentially
+        writer.writerows(MetricHandler.metric_data)
+        MetricHandler.metric_data.clear()

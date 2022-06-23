@@ -1,13 +1,14 @@
 import copy
+import csv
 import datetime
 import json
 import logging
 import os
 import sys
-from csv import DictReader
 from pathlib import Path
 from typing import Dict
 
+from localstack.aws.handlers.metric_handler import Metric
 from localstack.services.plugins import SERVICE_PLUGINS
 
 LOG = logging.getLogger(__name__)
@@ -45,8 +46,8 @@ def _init_service_metric_counter() -> Dict:
 
 
 def print_usage():
-    # TODO
-    print("missing argument for directory")
+    print("missing argument: directory")
+    print("usage: python metric_aggregator.py <dir-to-raw-csv-metric>")
 
 
 def main():
@@ -60,47 +61,48 @@ def main():
     for path in pathlist:
         print(f"checking {str(path)}")
         with open(path, "r") as csv_obj:
-            csv_dict_reader = DictReader(csv_obj)
-            # iterate over each line as an ordered dictionary
+            csv_dict_reader = csv.reader(csv_obj)
+            # skip the header
+            next(csv_dict_reader)
             for row in csv_dict_reader:
-                if row["xfail"] == "True":
-                    print(f"test {row['test_node_id']} marked as xfail")
+                metric: Metric = Metric(*row)
+                if metric.xfail == "True":
+                    print(f"test {metric.node_id} marked as xfail")
                     continue
                 recorder = (
                     metric_recorder_internal
-                    if row["origin"] == "internal"
+                    if metric.origin == "internal"
                     else metric_recorder_external
                 )
 
-                service = recorder[row["service"]]
-                ops = service[row["operation"]]
+                service = recorder[metric.service]
+                ops = service[metric.operation]
 
                 errors = ops.setdefault("errors", {})
-                if row["exception"]:
-                    exception = row["exception"]
-                    if exception not in errors:
-                        # TODO check if required
-                        # some errors are not explicitly in the shape, but are wrapped in a "CommonServiceException"
-                        errors = ops.setdefault("errors_not_in_shape", {})
+                if metric.exception:
+                    exception = metric.exception
                     errors[exception] = ops.get(exception, 0) + 1
-                elif int(row["response_code"]) >= 300:
+                elif int(metric.response_code) >= 300:
                     for expected_error in ops.get("errors", {}).keys():
-                        if expected_error in row["response"]:
+                        if expected_error in metric.response_data:
                             # assume we have a match
                             errors[expected_error] += 1
+                            LOG.warning(
+                                f"Exception assumed for {metric.service}.{metric.operation}: code {metric.response_code}"
+                            )
                             break
 
                 ops["invoked"] += 1
-                if not row["parameters"]:
+                if not metric.parameters:
                     params = ops.setdefault("parameters", {})
                     params["_none_"] = params.get("_none_", 0) + 1
                 else:
-                    for p in row["parameters"].split(","):
+                    for p in metric.parameters.split(","):
                         ops["parameters"][p] += 1
 
                 test_list = ops.setdefault("tests", [])
-                if row["test_node_id"] not in test_list:
-                    test_list.append(row["test_node_id"])
+                if metric.node_id not in test_list:
+                    test_list.append(metric.node_id)
 
     dtime = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%s")
 
