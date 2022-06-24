@@ -1009,6 +1009,7 @@ class TestCloudFormation:
         rs = events_client.list_rules()
         assert rule["Name"] not in [r["Name"] for r in rs["Rules"]]
 
+    @pytest.mark.xfail
     @pytest.mark.parametrize(
         "create_bucket_first, region", [(True, "eu-west-1"), (False, "us-east-1")]
     )
