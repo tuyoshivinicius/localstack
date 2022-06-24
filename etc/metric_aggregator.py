@@ -13,6 +13,9 @@ from localstack.services.plugins import SERVICE_PLUGINS
 
 LOG = logging.getLogger(__name__)
 
+template_implemented_item = "- [X] "
+template_not_implemented_item = "- [ ] "
+
 
 def _init_service_metric_counter() -> Dict:
     metric_recorder = {}
@@ -50,12 +53,81 @@ def print_usage():
     print("usage: python metric_aggregator.py <dir-to-raw-csv-metric>")
 
 
+def write_json(file_name: str, metric_dict: dict):
+    with open(file_name, "w") as fd:
+        fd.write(json.dumps(metric_dict, indent=2))
+
+
+def _print_diff(metric_recorder_internal, metric_recorder_external):
+    for key, val in metric_recorder_internal.items():
+        for subkey, val in val.items():
+            if isinstance(val, dict) and val.get("invoked"):
+                if val["invoked"] > 0 and not metric_recorder_external[key][subkey]["invoked"]:
+                    print(f"found invocation mismatch: {key}.{subkey}")
+
+
+def _generate_details_block(details_title: str, details: dict) -> str:
+    output = f"  <details><summary>{details_title}</summary>\n\n"
+    for e, count in details.items():
+        if count > 0:
+            output += f"  {template_implemented_item}{e}\n"
+        else:
+            output += f"  {template_not_implemented_item}{e}\n"
+    output += "  </details>\n"
+    return output
+
+
+def create_readable_report(file_name: str, metric_recorder_external: dict):
+    output = "# Metric Collection Report of Integration Tests #\n\n"
+    output += (
+        "**__Disclaimer__**: naive calculation of test coverage - if operation is called at least once, it is considered as 'covered'.\n"
+        "Report only includes 'external' calls.\n\n"
+    )
+    for service in sorted(metric_recorder_external.keys()):
+        output += f"## {service} ##\n"
+        details = metric_recorder_external[service]
+        if not details["service_attributes"]["pro"]:
+            output += "community\n"
+        elif not details["service_attributes"]["community"]:
+            output += "pro only\n"
+        else:
+            output += "community, and pro features\n"
+        del metric_recorder_external[service]["service_attributes"]
+
+        operation_counter = len(details)
+        operation_tested = 0
+
+        tmp = ""
+        for operation in sorted(details.keys()):
+            op_details = details[operation]
+            # TODO merge with internal recorded calls?
+            if op_details.get("invoked", 0) > 0:
+                operation_tested += 1
+                tmp += f"{template_implemented_item}{operation}\n"
+            else:
+                tmp += f"{template_not_implemented_item}{operation}\n"
+            if op_details.get("parameters"):
+                parameters = op_details.get("parameters")
+                parameters.pop("none", "")
+                if parameters:
+                    tmp += _generate_details_block("parameters  hit", parameters)
+            if op_details.get("errors"):
+                tmp += _generate_details_block("errors hit", op_details["errors"])
+
+        output += f"<details><summary>{operation_tested/operation_counter*100:.2f}% test coverage</summary>\n\n{tmp}\n</details>\n"
+
+        with open(file_name, "a") as fd:
+            fd.write(f"{output}\n")
+            output = ""
+
+
 def main():
     if not len(sys.argv) == 2 or not Path(sys.argv[1]).is_dir():
         print_usage()
 
     metric_recorder_internal = _init_service_metric_counter()
     metric_recorder_external = copy.deepcopy(metric_recorder_internal)
+
     base_dir = sys.argv[1]
     pathlist = Path(base_dir).rglob("metric-report-raw-data-*.csv")
     for path in pathlist:
@@ -104,23 +176,28 @@ def main():
                 if metric.node_id not in test_list:
                     test_list.append(metric.node_id)
 
-    dtime = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%s")
-
     metrics_path = os.path.join(base_dir, "metrics")
     Path(metrics_path).mkdir(parents=True, exist_ok=True)
-    fname = os.path.join(
-        metrics_path,
-        f"metric-report-{dtime}.json",
-    )
-    with open(fname, "w") as fd:
-        fd.write(json.dumps(metric_recorder_external, indent=2))
+    dtime = datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%s")
 
-    fname = os.path.join(
-        metrics_path,
-        f"metric-report-internal-calls-{dtime}.json",
+    write_json(
+        os.path.join(
+            metrics_path,
+            f"metric-report-{dtime}.json",
+        ),
+        metric_recorder_external,
     )
-    with open(fname, "w") as fd:
-        fd.write(json.dumps(metric_recorder_internal, indent=2))
+    write_json(
+        os.path.join(
+            metrics_path,
+            f"metric-report-internal-calls-{dtime}.json",
+        ),
+        metric_recorder_internal,
+    )
+
+    filename = os.path.join(metrics_path, f"metric-report-{dtime}.md")
+    # TODO also consider metric_recorder_internal for the report?
+    create_readable_report(filename, metric_recorder_external)
 
 
 if __name__ == "__main__":

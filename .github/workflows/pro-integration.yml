@@ -165,6 +165,10 @@ jobs:
         with:
           files: localstack-ext/target/reports/*.xml
           check_name: LocalStack integration with Pro
+      - name: Create Metric Reports
+        run: |
+          source .venv/bin/activate
+          python etc/metric_aggregator.py ../localstack/target/metric_reports
       - name: Archive metric-collection results
         uses: actions/upload-artifact@v3
         with:
