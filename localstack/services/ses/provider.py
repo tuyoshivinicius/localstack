@@ -95,7 +95,7 @@ class SesServiceApiResource:
 
     This is registered as a LocalStack internal HTTP resource.
 
-    The endpoint accepts:
+    This endpoint accepts:
     - GET param `messageId`: filter for SES message ID
     """
 
@@ -106,7 +106,7 @@ class SesServiceApiResource:
                 messages = [EMAILS[message_id]]
         else:
             # cast `dict_values` to `list` because the former is not json serialisable
-            messages = ([email for email in EMAILS.values()],)
+            messages = [email for email in EMAILS.values()]
 
         return {
             "messages": messages,
