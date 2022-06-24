@@ -262,6 +262,9 @@ ENV LOCALSTACK_BUILD_VERSION=${LOCALSTACK_BUILD_VERSION}
 # expose edge service, external service ports, and debugpy
 EXPOSE 4566 4510-4559 5678
 
+# default volume directory
+VOLUME /var/lib/localstack
+
 HEALTHCHECK --interval=10s --start-period=15s --retries=5 --timeout=5s CMD ./bin/localstack status services
 
 # define command at startup
